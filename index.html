@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Certifyx – Certificate Manager</title>
+<meta name="description" content="Collect, verify and sync student certificates between Google Drive, Google Sheets and your class roster.">
+<meta name="theme-color" content="#070b14">
+<link rel="icon" href="icons/pwa-192x192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head><body>
+<div class="app">
+ <aside class="side fac" aria-label="Main navigation">
+  <div class="brand"><div class="logo">🎓</div><div><b>Certifyx</b><span>Certificate manager</span></div></div>
+  <nav class="nav">
+   <div class="nsec">Workspace</div>
+   <button class="tab on" data-view="dash" data-i="home"><span>Overview</span></button>
+   <button class="tab" data-view="students" data-i="users"><span>Students</span><span class="badge" id="rosterpill"><span class="cnt">0</span></span></button>
+   <button class="tab" data-view="requirements" data-i="list"><span>Requirements</span></button>
+   <button class="tab" data-view="access" data-i="users"><span>Student access</span></button>
+   <button class="tab" data-view="review" data-i="warn"><span>Needs review</span><span class="badge warn hidden" id="nrv">0</span></button>
+   <div class="nsec">Communicate</div>
+   <button class="tab" data-view="alerts" data-i="bell"><span>Alerts</span></button>
+   <div class="nsec">Reports</div>
+   <button class="tab" data-view="export" data-i="dl"><span>Export</span></button>
+   <button class="tab" data-view="audit" data-i="list"><span>Audit log</span></button>
+  </nav>
+  <div class="sfoot">
+   <div class="syncs"><i class="dot"></i><div><b>Last sync <span id="synced">–</span></b><small id="autolbl">Auto-sync off</small></div></div>
+   <div class="links"><a id="lnkDrive" target="_blank" rel="noopener" data-i="folder">Drive folder</a><a id="lnkSheet" target="_blank" rel="noopener" data-i="file">Google Sheet</a></div>
+   <button class="navb sys" data-act="settings" data-i="gear">Settings &amp; system check</button>
+   <button class="navb hidden" id="install" data-act="install" data-i="dl">Install app</button>
+   <div class="user"><div class="av uav">?</div><div class="f1"><b class="uname">Signed out</b><small class="urole"></small></div><button class="ib" data-act="signout" aria-label="Sign out" title="Sign out" data-i="out"></button></div>
+  </div>
+ </aside>
+ <div class="shell">
+  <header class="top fac">
+   <div class="ttl"><h1 id="pgtitle">Overview</h1><p id="pgsub">Compliance at a glance</p></div>
+   <div class="tools">
+    <button class="ib" data-act="cmd" aria-label="Search (Ctrl+K)" title="Search · Ctrl+K" data-i="search"></button>
+    <button class="ib" id="theme" aria-label="Toggle theme" title="Toggle theme"></button>
+    <button class="ghost" data-act="remind" data-i="mail"><span>Remind</span></button>
+    <button class="btn b" id="sync" data-i="sync"><span>Sync now</span></button>
+   </div>
+  </header>
+  <header class="top stu">
+   <div class="brand"><div class="logo">🎓</div><div><b>Certifyx</b><span>Student portal</span></div></div>
+   <div class="tools"><button class="ib" data-act="theme2" aria-label="Toggle theme" data-i="sun"></button><div class="suser"><div class="av uav">?</div><div><b class="uname"></b><small class="urole"></small></div></div><button class="ghost" data-act="signout" data-i="out"><span>Sign out</span></button></div>
+  </header>
+  <main id="top" class="content fac">
+   <div class="view" id="v-dash"><div class="skel" style="height:56px;width:46%"></div><div class="skel" style="height:240px"></div><div class="skel" style="height:110px"></div></div>
+   <div class="view hidden" id="v-students">
+    <section class="card toolbar"><div class="srch"><span data-i="search"></span><input id="q" placeholder="Search by name or roll number" aria-label="Search students"></div>
+     <div class="seg"><button class="on" data-mode="matrix" data-i="grid"><span>Seat map</span></button><button data-mode="table" data-i="list"><span>Table</span></button></div>
+     <div class="acts"><button class="ghost" data-act="batch" data-i="users"><span>Import</span></button><button class="btn b" data-act="addstu" data-i="plus"><span>Add student</span></button></div></section>
+    <div class="chips" id="fch"></div>
+    <section class="card"><div class="row sb wrap"><h3><span id="seatttl">Seat map</span> <span class="tag" id="seatsub"></span></h3>
+      <div id="seatctl" class="seg"><button class="on" data-vw="desk"><span>Desk map</span></button><button data-vw="honey"><span>Honeycomb</span></button><button data-vw="tiles"><span>Tiles</span></button></div></div>
+     <div class="chips tight" id="mch"></div><div id="mx" class="seats desk"></div><div id="tb"></div></section>
+   </div>
+   <div class="view hidden" id="v-requirements"></div><div class="view hidden" id="v-access"></div><div class="view hidden" id="v-review"></div><div class="view hidden" id="v-alerts"></div><div class="view hidden" id="v-export"></div><div class="view hidden" id="v-audit"></div>
+  </main>
+  <main id="stu" class="content stu"></main>
+ </div>
+ <nav class="bn fac" aria-label="Main navigation">
+  <button class="on" data-view="dash" data-i="home"><span>Overview</span></button><button data-view="students" data-i="users"><span>Students</span></button><button data-view="review" data-i="warn"><span>Review</span></button><button data-view="alerts" data-i="bell"><span>Alerts</span></button><button data-view="export" data-i="dl"><span>Export</span></button><button data-act="more" data-i="list"><span>More</span></button>
+ </nav>
+</div>
+<div id="gate"></div><div id="modal"></div><div id="cmdk"></div><div id="toast" role="status" aria-live="polite"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.58.0/dist/umd/supabase.js"></script>
+<script>window.supabase||document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"><\/script>')</script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body></html>

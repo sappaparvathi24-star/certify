@@ -1,0 +1,20 @@
+# The functions verify the signed-in user themselves (auth.getUser), so the gateway's legacy JWT check is turned off.
+# This is required on projects that use the new JWT signing keys / publishable keys.
+[functions.upload-certificate]
+verify_jwt = false
+[functions.admin-remove]
+verify_jwt = false
+[functions.sync-drive-sheet]
+verify_jwt = false
+[functions.student-api]
+verify_jwt = false
+[functions.admin-students]
+verify_jwt = false
+[functions.google-connect]
+verify_jwt = false
+[functions.google-callback]
+verify_jwt = false
+[functions.send-reminders]
+verify_jwt = false
+[functions.verify-certificate]
+verify_jwt = false

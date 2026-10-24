@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Certifyx setup check</title>
+<style>
+body{font:15px/1.5 system-ui,sans-serif;background:#060a16;color:#f4f7ff;margin:0;padding:24px}main{max-width:820px;margin:0 auto}
+h1{margin:0 0 4px}p.s{color:#9fb0d6;margin:0 0 20px}.r{border:1px solid #1b2858;background:#0c1330;border-radius:12px;padding:12px 16px;margin:10px 0}
+.r.fail{border-color:#f43f5e}.r.warn{border-color:#f59e0b}.r.ok{border-color:#10b981}.fix{color:#ffd37a;margin-top:4px}.r div{word-break:break-word}
+button{background:#2f6bff;color:#fff;border:0;border-radius:10px;padding:10px 16px;font:inherit;cursor:pointer;margin:6px 8px 0 0}button.g{background:#1b2858}
+pre{background:#050a1c;border:1px solid #1b2858;border-radius:12px;padding:12px;white-space:pre-wrap;word-break:break-word;font-size:12px}a{color:#7aa8ff}
+</style></head><body><main>
+<h1>Certifyx setup check</h1><p class="s">Runs in your browser against your deployed site. It only reads — nothing is changed. Send the report at the bottom if something is red.</p>
+<div id="out"></div>
+<div><button id="copy">Copy report</button><button id="sw" class="g">Clear cached app (service worker + caches)</button><a href="index.html">← back to the app</a></div>
+<pre id="rep"></pre><span id="done" hidden></span>
+<script src="config.js"></script>
+<script>
+const out=document.getElementById('out'),R=[],esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const ICON={ok:'✅',warn:'⚠️',fail:'❌',info:'ℹ️'};
+function add(lvl,name,detail,fix){R.push({lvl,name,detail,fix});const d=document.createElement('div');d.className='r '+(lvl==='info'?'':lvl);d.innerHTML=`<b>${ICON[lvl]} ${esc(name)}</b><div>${esc(detail)}</div>${fix?`<div class="fix">→ ${esc(fix)}</div>`:''}`;out.append(d)}
+const C=window.CX||{};
+(async()=>{
+ try{
+  // 1. config.js
+  const ph=!C.url||String(C.url).includes('YOUR-PROJECT')||!C.anon||String(C.anon).includes('YOUR-ANON');
+  if(ph){add('fail','config.js','Still contains the placeholder values (or is missing).','Open config.js on your host, paste the project URL and anon/publishable key (Supabase → Project Settings → API), redeploy and hard-refresh.');return}
+  const okUrl=/^https:\/\/[a-z0-9-]+\.supabase\.(co|in)\/?$/.test(C.url)||/^http:\/\/localhost/.test(C.url);
+  if(!okUrl){add('fail','Project URL',C.url,'It must look like https://abcdxyz.supabase.co (no /rest/v1, no dashboard link).');return}
+  const base=C.url.replace(/\/$/,''),legacy=!String(C.anon).startsWith('sb_'),masked=String(C.anon).slice(0,14)+'…';
+  const H=legacy?{apikey:C.anon,Authorization:'Bearer '+C.anon}:{apikey:C.anon};
+  add('ok','config.js',`URL ${base} · key ${masked} (${legacy?'legacy anon JWT':'new publishable key'})`);
+  if(legacy&&String(C.anon).split('.').length!==3)add('fail','Anon key shape','A legacy anon key has 3 dot-separated parts — this one does not.','Copy the full key again (no spaces / quotes / line breaks).');
+  if(/service_role/.test(atobSafe(String(C.anon).split('.')[1]||'')))add('fail','SECURITY: service_role key in config.js','This key bypasses all access rules and is public in the browser.','Replace it with the anon/publishable key immediately and rotate the service_role key.');
+  // 2. reachable + key valid + providers
+  let s=null;
+  try{const r=await fetch(base+'/auth/v1/settings',{headers:H});
+    if(r.status===401||r.status===403)add('fail','Supabase API key','Supabase rejected the key (HTTP '+r.status+').','Use the anon (legacy) or publishable key of THIS project.');
+    else if(!r.ok)add('fail','Supabase reachable','HTTP '+r.status+' from /auth/v1/settings.','Check the project URL; the project may be paused (free projects pause after inactivity — Resume it in the dashboard).');
+    else{s=await r.json();add('ok','Supabase reachable','Auth service answered; key accepted.')}
+  }catch(e){add('fail','Supabase reachable','Browser could not reach '+base+' ('+e.message+').','Check the URL, your network/ad-blocker, and that the project is not paused.')}
+  if(s){
+    s.external&&s.external.google?add('ok','Google sign-in provider','Enabled in Supabase.'):add('fail','Google sign-in provider','Google is NOT enabled in Supabase.','Supabase → Authentication → Providers → Google → enable, paste the Google client ID + secret.');
+    if(s.disable_signup)add('fail','New sign-ups','Sign-ups are disabled, so first-time users cannot log in.','Supabase → Authentication → Sign In / Providers → turn on "Allow new users to sign up".');
+  }
+  // 3. database schema
+  for(const t of ['settings','students','requirements','student_status']){
+    try{const r=await fetch(`${base}/rest/v1/${t}?select=*&limit=1`,{headers:H}),j=await r.json().catch(()=>({}));
+      if(r.status===404||j.code==='PGRST205'||j.code==='42P01')add('fail','Database: '+t,'Not found in the database.','Run supabase/schema.sql (then seed.sql) in the Supabase SQL Editor and read any red error it prints.');
+      else if(r.status===401)add('fail','Database: '+t,'Unauthorized (HTTP 401).','Wrong/expired API key.');
+      else add('ok','Database: '+t,'Exists (anonymous visitors correctly see no rows).');
+    }catch(e){add('fail','Database: '+t,e.message)}
+  }
+  try{const r=await fetch(`${base}/rest/v1/rpc/ensure_profile`,{method:'POST',headers:{...H,'Content-Type':'application/json'},body:'{}'}),j=await r.json().catch(()=>({}));
+    j.code==='PGRST202'||r.status===404?add('warn','Function ensure_profile','Missing — you are on an older schema.','Re-run supabase/schema.sql in the SQL Editor (it is safe to run again and adds ensure_profile).'):add('ok','Function ensure_profile','Present.')}catch(e){}
+  // 4. edge functions
+  for(const n of ['student-api','admin-students','google-connect','send-reminders','verify-certificate','upload-certificate','admin-remove','sync-drive-sheet']){
+    try{const r=await fetch(`${base}/functions/v1/${n}`,{method:'POST',headers:{...H,'Content-Type':'application/json'},body:'{}'}),j=await r.json().catch(()=>({}));
+      if(r.status===404)add('fail','Function '+n,'Not deployed.',`supabase functions deploy ${n} --no-verify-jwt`);
+      else if(typeof j.error==='string'||typeof j.valid==='boolean'||r.status===400)add('ok','Function '+n,'Deployed and enforcing sign-in.');
+      else if(r.status===401||r.status===403)add('warn','Function '+n,`Gateway rejected the request (${j.message||j.code||r.status}).`,`Redeploy with JWT verification off — the function checks the user itself: supabase functions deploy ${n} --no-verify-jwt`);
+      else add('warn','Function '+n,'Unexpected answer: HTTP '+r.status+' '+JSON.stringify(j).slice(0,160));
+    }catch(e){add('fail','Function '+n,'Not reachable ('+e.message+').','Deploy it, or the browser is blocking the request (CORS / ad-blocker).')}
+  }
+  add('info','Function google-callback','Cannot be tested from a browser (Google redirects to it).',`Make sure it is deployed with: supabase functions deploy google-callback --no-verify-jwt   and that ${base}/functions/v1/google-callback is an authorised redirect URI in your Google OAuth client.`);
+  // 5. who is signed in on THIS browser
+  const key=Object.keys(localStorage).find(k=>/^sb-.*-auth-token$/.test(k));
+  if(!key)add('info','Signed-in account','Nobody is signed in on this browser.','Sign in on the app, then reload this page to also check your account, role and roll number.');
+  else{
+    try{const t=JSON.parse(localStorage[key]),tok=t.access_token||(t.currentSession&&t.currentSession.access_token),AH={apikey:C.anon,Authorization:'Bearer '+tok};
+      const u=await fetch(base+'/auth/v1/user',{headers:AH});
+      if(!u.ok)add('fail','Signed-in account','Supabase rejected the saved session (HTTP '+u.status+').','Sign out and sign in again.');
+      else{const uj=await u.json();add('ok','Signed-in account',uj.email||uj.id);
+        const r=await fetch(base+'/rest/v1/rpc/ensure_profile',{method:'POST',headers:{...AH,'Content-Type':'application/json'},body:'{}'}),p=await r.json().catch(()=>({}));
+        if(p&&p.role){p.role==='faculty'?add('ok','Role','faculty — full access.'):p.roll_no?add('ok','Role','student linked to roll number '+p.roll_no):add('warn','Role','student, NOT linked to a roll number.','Faculty must add this exact email ('+uj.email+') on the roster (Add Student / Batch Import). If you are faculty: insert into faculty_emails values (\''+uj.email+'\');')}
+        else add('fail','Profile',JSON.stringify(p).slice(0,200),'Re-run schema.sql (safe to repeat), then sign in again. If it says "Database error saving new user", the handle_new_user trigger failed.')}
+    }catch(e){add('fail','Signed-in account',e.message)}
+  }
+  // 6. things only you can confirm
+  add('info','Supabase → Authentication → URL Configuration',`Site URL must be ${location.origin}/ and Redirect URLs must include ${location.origin}/ (or ${location.origin}/**).`,'If Google sends you to localhost afterwards, the Site URL is still the default.');
+  add('info','Google Cloud → Credentials → your OAuth client',`Authorised redirect URI must be exactly: ${base}/auth/v1/callback`,'OAuth consent screen in "Testing" mode only lets listed Test users sign in (and tokens expire after 7 days).');
+  // 7. library + cached app
+  const load=src=>new Promise(res=>{const s=document.createElement('script');s.src=src;s.onload=()=>res(true);s.onerror=()=>res(false);document.head.append(s)});
+  const lib=await load('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js');
+  lib?add('ok','Supabase library','Loads from the CDN.'):add('fail','Supabase library','Could not load from cdn.jsdelivr.net.','Your network/ad-blocker blocks it. Allow cdn.jsdelivr.net or host supabase.js with the site.');
+  const regs=navigator.serviceWorker?await navigator.serviceWorker.getRegistrations():[];
+  regs.length?add('info','Cached app (service worker)',regs.length+' service worker(s) registered for this site.','If you see an old version of the app, press "Clear cached app" below and reload.'):add('info','Cached app (service worker)','None registered.');
+ }catch(e){add('fail','Checker error',e.message)}
+ finally{
+  const bad=R.filter(r=>r.lvl==='fail').length,warn=R.filter(r=>r.lvl==='warn').length;
+  const sum=bad?`${bad} problem(s) to fix first (red).`:warn?`No blockers, ${warn} warning(s).`:'Everything checked here looks fine.';
+  document.getElementById('rep').textContent=`Certifyx setup check — ${new Date().toISOString()}\nSite: ${location.origin}\n${sum}\n\n`+R.map(r=>`${ICON[r.lvl]} ${r.name}: ${r.detail}${r.fix?'\n    → '+r.fix:''}`).join('\n');
+  document.getElementById('done').hidden=false;document.getElementById('done').id='done';
+ }
+})();
+function atobSafe(s){try{return atob(s.replace(/-/g,'+').replace(/_/g,'/'))}catch(e){return ''}}
+document.getElementById('copy').onclick=()=>{const t=document.getElementById('rep').textContent;try{navigator.clipboard.writeText(t)}catch(e){const a=document.createElement('textarea');a.value=t;document.body.append(a);a.select();document.execCommand('copy');a.remove()}document.getElementById('copy').textContent='Copied ✓'};
+document.getElementById('sw').onclick=async()=>{for(const r of await (navigator.serviceWorker?navigator.serviceWorker.getRegistrations():[]))await r.unregister();for(const k of await caches.keys())await caches.delete(k);document.getElementById('sw').textContent='Cleared — reload the app';};
+</script></main></body></html>
