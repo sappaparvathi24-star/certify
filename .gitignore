@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+service-account*.json
+supabase/.temp/
+supabase/.branches/
+node_modules/
+dist/
+coverage/
+__pycache__/
+*.pyc
+.DS_Store
