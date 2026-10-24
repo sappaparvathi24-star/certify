@@ -1,2 +1,2 @@
 // Paste your Supabase project values (Project Settings → API). The anon key is safe to expose; access is enforced by RLS.
-window.CX={url:'https://YOUR-PROJECT.supabase.co',anon:'YOUR-ANON-KEY',domain:''};   // domain: optional, e.g. 'college.edu' to offer only school accounts
+window.CX={url:'https://wuqgimtwnobqoealwbke.supabase.co',anon:'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind1cWdpbXR3bm9icW9lYWx3YmtlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI4MzM2MDEsImV4cCI6MjEwODQwOTYwMX0.nB6wls9VnbQAVkZmkDOuhUK2jOYEk8XOqYpR2HRgucY',domain:''};   // domain: optional, e.g. 'college.edu' to offer only school accounts
