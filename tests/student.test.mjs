@@ -3,6 +3,7 @@ import {FakeDB,FakeGoogle,seedStudents} from './fakes.mjs';
 import {makeCode,normCode,setCode,provisionCodes,studentLogin,studentFromToken,studentOverview,studentUpload,handleStudentApi,handleAdminStudents,remindersCore,verifyCore,syncCore} from '../supabase/functions/_shared/core.ts';
 import {signState,verifyState,encryptToken,decryptToken,authUrl,exchangeCode,createResources,SHEET_HEADER} from '../supabase/functions/_shared/oauth.ts';
 const PDF=new Uint8Array([0x25,0x50,0x44,0x46,0x2d,0x31,0x2e,0x34,10,1,2,3]);
+const D={title:'Test Title',authority:'NPTEL',cert_date:'2026-03-01',year:'2nd Year'};
 const DAY=86400000;
 const setup=async()=>{const db=new FakeDB(),g=new FakeGoogle();seedStudents(db,[['25A31A05GB','SAPPA JAYARAM'],['25A31A05GC','SASUBILLI SASANK'],['25A31A05EN','PEMMANABOIDI KEERTHANA']]);
   db.t.students[2].section='CSE-A';const cfg=db.t.settings[0];
@@ -49,48 +50,48 @@ test('overview: requirement statuses (pending/submitted/overdue), section filter
   const a=mk({name:'Hackathon'}),b=mk({name:'Internship',deadline:new Date(Date.now()-2*DAY).toISOString()}),c=mk({name:'Sports',sections:['CSE-A']}),d=mk({name:'Old',active:false});
   await db.from('students').update({section:'CSE-C'}).eq('roll_no',GB).run();
   let o=await studentOverview(db,GB);assert.deepEqual(o.requirements.map(r=>[r.name,r.status]),[['Hackathon','PENDING'],['Internship','OVERDUE']]);
-  await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF});
+  await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF,...D});
   o=await studentOverview(db,GB);assert.equal(o.requirements[0].status,'SUBMITTED');assert.ok(!JSON.stringify(o).includes('drive.google.com'),'no Drive link for students');
   assert.equal((await studentOverview(db,'25A31A05EN')).requirements.map(r=>r.name).join(),'Hackathon,Internship,Sports');
 });
 test('upload: requirement fills name/category/folder/sheet; subfolder created once and cached; PDF check; size; section; inactive',async()=>{
   const {db,g,cfg,mk,gf}=await setup();const a=mk({name:'Course Completion',max_mb:1}),c=mk({name:'Sports',sections:['CSE-A']}),d=mk({name:'Old',active:false});
-  const r=await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF});
-  assert.equal(r.file_name,'25A31A05GB_Course_Completion.pdf');assert.ok(!('drive_link' in r));
+  const r=await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF,...D});
+  assert.equal(r.file_name,'25A31A05GB_Course_Completion_Test_Title.pdf');assert.ok(!('drive_link' in r));
   const f=g.live()[0];assert.equal(f.folder,g.folders.get('FOLDER|Course Completion'));
-  const row=g.rows[1];assert.equal(row[3],'Course Completion');assert.equal(row[7],'Course Completion');assert.equal(row[8],'');assert.equal(row[6],db.t.certificates[0].id);
+  const row=g.rows[1];assert.deepEqual(row.slice(0,9),['=ROW()-1',GB,'SAPPA JAYARAM','2nd Year','CSE-C (2025-26)','Course Completion','Test Title','NPTEL','March 2026 (01-03-2026)']);assert.equal(row[11],'');assert.equal(row[10],db.t.certificates[0].id);
   assert.equal(db.t.certificates[0].requirement_id,a.id);assert.ok(db.t.requirements.find(x=>x.id===a.id).drive_folder_id);
-  await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF});assert.equal(g.folders.size,1,'folder reused');assert.equal(db.t.certificates.length,1,'same requirement replaces');assert.equal(g.live().length,1);
-  const ex=async(args,re)=>await assert.rejects(()=>studentUpload(db,gf,cfg,GB,args),re);
+  await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF,...D});assert.equal(g.folders.size,1,'folder reused');assert.equal(db.t.certificates.length,1,'same requirement replaces');assert.equal(g.live().length,1);
+  const ex=async(args,re)=>await assert.rejects(()=>studentUpload(db,gf,cfg,GB,{...D,...args}),re);
   await ex({requirement_id:a.id,bytes:new TextEncoder().encode('hello world, not a pdf')},/Only PDF/);
   await ex({requirement_id:a.id,bytes:new Uint8Array(1048577).fill(0x25)},/Only PDF|larger/);
   const big=new Uint8Array(1048577);big.set(PDF);await ex({requirement_id:a.id,bytes:big},/larger than 1 MB/);
   await ex({requirement_id:a.id,bytes:undefined},/Choose a file/);await ex({requirement_id:c.id,bytes:PDF},/not for your section/);await ex({requirement_id:d.id,bytes:PDF},/not available/);await ex({requirement_id:'nope',bytes:PDF},/not available/);
 });
 test('upload: a FAILED replacement keeps the previous submission (nothing is lost)',async()=>{
-  const {db,g,cfg,mk,gf}=await setup();const a=mk({name:'Hackathon'});await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF});
+  const {db,g,cfg,mk,gf}=await setup();const a=mk({name:'Hackathon'});await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF,...D});
   const oldId=db.t.certificates[0].id,oldFile=g.live()[0].id;g.fail.upload='Drive is down';
-  await assert.rejects(()=>studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF}),/Drive is down/);
+  await assert.rejects(()=>studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF,...D}),/Drive is down/);
   assert.equal(db.t.certificates.length,1);assert.equal(db.t.certificates[0].id,oldId);assert.equal(g.live()[0].id,oldFile);assert.equal(g.rows.length,2);
-  g.fail={};g.fail.append='quota';await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF});
+  g.fail={};g.fail.append='quota';await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF,...D});
   assert.equal(db.t.certificates.length,1,'replacement succeeded even though the Sheet append failed');assert.notEqual(db.t.certificates[0].id,oldId);assert.equal(g.live().length,1);
 });
 test('upload: after the deadline is accepted but flagged LATE in DB and Sheet; flat layout skips sub-folders',async()=>{
   const {db,g,cfg,mk,gf}=await setup();const a=mk({name:'Internship',deadline:new Date(Date.now()-DAY).toISOString()});
-  const r=await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF});assert.equal(r.late,true);assert.equal(db.t.certificates[0].late,true);assert.equal(g.rows[1][8],'LATE');
-  db.t.settings[0].folder_layout='flat';const b=mk({name:'Workshop'});await studentUpload(db,gf,cfg,GB,{requirement_id:b.id,bytes:PDF});assert.equal(g.live().find(f=>f.name.includes('Workshop')).folder,'FOLDER');
+  const r=await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF,...D});assert.equal(r.late,true);assert.equal(db.t.certificates[0].late,true);assert.equal(g.rows[1][11],'LATE');
+  db.t.settings[0].folder_layout='flat';const b=mk({name:'Workshop'});await studentUpload(db,gf,cfg,GB,{requirement_id:b.id,bytes:PDF,...D});assert.equal(g.live().find(f=>f.name.includes('Workshop')).folder,'FOLDER');
 });
 test('upload: rate limit per student per day',async()=>{
   const {db,g,cfg,mk,gf}=await setup();const a=mk({name:'Hackathon'});
   for(let i=0;i<30;i++)db.t.audit_logs.push({actor:GB,action:'DIRECT_STUDENT_UPLOAD',created_at:new Date().toISOString()});
-  await assert.rejects(()=>studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF}),/Daily upload limit/);
+  await assert.rejects(()=>studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF,...D}),/Daily upload limit/);
 });
 test('API: unauthenticated calls refused; login→me→upload→read→change_code→logout round-trip; token of one student can never reach another',async()=>{
   const {db,g,cfg,mk,gf}=await setup();const a=mk({name:'Hackathon'});await setCode(db,GB,'K7M2Q-9XH4T');await setCode(db,'25A31A05GC','P3R5T-8WN6V');
   assert.equal((await handleStudentApi(db,gf,cfg,{action:'me',token:''})).status,401);assert.equal((await handleStudentApi(db,gf,cfg,{action:'upload',token:'x',requirement_id:a.id,bytes:PDF})).status,401);
   assert.equal(g.calls.includes('upload'),false);
   const {body:{token}}=await handleStudentApi(db,gf,cfg,{action:'login',roll:GB,code:'K7M2Q-9XH4T'});
-  const up=await handleStudentApi(db,gf,cfg,{action:'upload',token,requirement_id:a.id,bytes:PDF,roll_no:'25A31A05GC'});assert.equal(up.status,200);assert.equal(db.t.certificates[0].roll_no,GB,'extra roll_no field is ignored');
+  const up=await handleStudentApi(db,gf,cfg,{action:'upload',token,requirement_id:a.id,bytes:PDF,roll_no:'25A31A05GC',...D});assert.equal(up.status,200);assert.equal(db.t.certificates[0].roll_no,GB,'extra roll_no field is ignored');
   assert.equal((await handleStudentApi(db,gf,cfg,{action:'upload',token,requirement_id:a.id,bytes:new Uint8Array([1,2,3,4,5,6,7,8,9])})).status,400);
   const me=await handleStudentApi(db,gf,cfg,{action:'me',token});assert.equal(me.body.student.roll_no,GB);assert.equal(me.body.certificates.length,1);
   db.from('notifications').insert({roll_no:'25A31A05GC',title:'x',message:'y'}).run();const nid=db.t.notifications[0].id;
@@ -104,7 +105,7 @@ test('API: unauthenticated calls refused; login→me→upload→read→change_co
 test('reminders: due-soon + overdue, skips submitted/not-required/out-of-window/other sections, deduped within cooldown',async()=>{
   const {db,g,cfg,mk,gf}=await setup();const now=Date.now();
   const soon=mk({name:'Soon',deadline:new Date(now+2*DAY).toISOString()}),over=mk({name:'Over',deadline:new Date(now-DAY).toISOString()}),far=mk({name:'Far',deadline:new Date(now+20*DAY).toISOString()}),opt=mk({name:'Opt',required:false,deadline:new Date(now+DAY).toISOString()}),sec=mk({name:'SecA',sections:['CSE-A'],deadline:new Date(now+DAY).toISOString()});
-  await studentUpload(db,gf,cfg,GB,{requirement_id:soon.id,bytes:PDF});
+  await studentUpload(db,gf,cfg,GB,{requirement_id:soon.id,bytes:PDF,...D});
   const r=await remindersCore(db,now);
   const titles=roll=>db.t.notifications.filter(n=>n.roll_no===roll).map(n=>n.title).sort();
   assert.deepEqual(titles(GB),['Overdue: Over'],'GB submitted "Soon", so only overdue');
@@ -114,13 +115,13 @@ test('reminders: due-soon + overdue, skips submitted/not-required/out-of-window/
   assert.equal((await remindersCore(db,now+25*3600000)).sent,6,'after the cooldown the still-missing items are reminded again');
 });
 test('verify: valid only for approved students, masked data only',async()=>{
-  const {db,g,cfg,mk,gf}=await setup();const a=mk({name:'Hackathon'});const r=await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF});
+  const {db,g,cfg,mk,gf}=await setup();const a=mk({name:'Hackathon'});const r=await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF,...D});
   assert.equal((await verifyCore(db,r.id)).valid,false);await db.from('students').update({approval:'APPROVED'}).eq('roll_no',GB).run();
   const v=await verifyCore(db,r.id);assert.equal(v.valid,true);assert.equal(v.student,'S•••• J••••••');assert.equal(v.roll,'••••••05GB');assert.equal(v.certificate,'Hackathon');assert.ok(!JSON.stringify(v).includes('SAPPA'));
   assert.equal((await verifyCore(db,'11111111-1111-1111-1111-111111111111')).valid,false);
 });
 test('sync still works with sub-folders and the new sheet columns (no resurrect, no duplicates)',async()=>{
-  const {db,g,cfg,mk,gf}=await setup();const a=mk({name:'Hackathon'});await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF});
+  const {db,g,cfg,mk,gf}=await setup();const a=mk({name:'Hackathon'});await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF,...D});
   const before=g.rows.length;const s=await syncCore(db,g,cfg,'t');assert.equal(s.repaired,0);assert.equal(g.rows.length,before);assert.equal(db.t.certificates.length,1);
 });
 /* ---------- Google OAuth (admin's own client ID) ---------- */
@@ -138,7 +139,7 @@ test('oauth: refresh token is encrypted (AES-GCM), round-trips, and fails with a
 test('oauth: consent URL uses the admin\'s client, offline access, narrow scopes and the signed state',()=>{
   const u=new URL(authUrl('CID.apps','https://x.supabase.co/functions/v1/google-callback','STATE'));
   assert.equal(u.searchParams.get('client_id'),'CID.apps');assert.equal(u.searchParams.get('access_type'),'offline');assert.equal(u.searchParams.get('prompt'),'consent');assert.equal(u.searchParams.get('state'),'STATE');
-  assert.ok(u.searchParams.get('scope').includes('drive.file')&&!u.searchParams.get('scope').includes('auth/drive '),'drive.file, not full drive');
+  assert.ok(u.searchParams.get('scope').includes('auth/drive ')&&!u.searchParams.get('scope').includes('drive.file'),'full Drive scope: needed to write into your existing, shared folder');
 });
 test('oauth: code exchange extracts refresh token + email; a missing refresh token gives actionable advice',async()=>{
   const idt='x.'+Buffer.from(JSON.stringify({email:'admin@gmail.com'})).toString('base64url')+'.y',calls=[];
@@ -154,7 +155,7 @@ test('oauth: creates folder + sheet with header, moves the sheet into the folder
     if(u.endsWith('/v4/spreadsheets'))return {ok:true,json:async()=>({spreadsheetId:'SHEET1'})};
     return {ok:true,json:async()=>({})};};
   const r=await createResources(f,'TOKEN');assert.deepEqual([r.folderId,r.spreadsheetId,r.tab,r.moved],['FOLDER1','SHEET1','Form Responses 1',true]);
-  assert.ok(calls[2][1].includes('values/Form%20Responses%201!A1:I1')&&calls[2][2].includes('Submission ID')&&SHEET_HEADER.length===9);assert.ok(calls[3][1].includes('addParents=FOLDER1'));
+  assert.ok(calls[2][1].includes('values/Form%20Responses%201!A1:L1')&&calls[2][2].includes('Submission id')&&calls[2][2].includes('Month with date')&&SHEET_HEADER.length===12);assert.ok(calls[3][1].includes('addParents=FOLDER1'));
   await assert.rejects(()=>createResources(async()=>({ok:false,text:async()=>'quota'}),'T'),/Drive folder.*quota/);
 });
 test('google token: uses the encrypted connection stored by the admin panel and records success/errors',async()=>{
@@ -169,4 +170,23 @@ test('google token: uses the encrypted connection stored by the admin panel and 
     await assert.rejects(()=>googleToken(db),/Reconnect Google/);assert.match(db.t.google_connection[0].last_error,/invalid_grant/);
     db.t.google_connection[0].refresh_token_enc=null;await assert.rejects(()=>googleToken(db),/Connect Google/);
   }finally{globalThis.fetch=orig;globalThis.Deno=od;}
+});
+
+test('upload: certificate details are validated on the server (title, authority, date, year)',async()=>{
+  const {db,g,cfg,mk,gf}=await setup();const a=mk({name:'Courses'});
+  const ex=(o,re)=>assert.rejects(()=>studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF,...D,...o}),re);
+  await ex({title:'ab'},/title/i);await ex({title:''},/title/i);await ex({authority:''},/Authority/);await ex({cert_date:''},/date/i);await ex({cert_date:'2026-02-31'},/date/i);
+  await ex({cert_date:'2099-01-01'},/future/);await ex({cert_date:'1990-01-01'},/looks wrong/);await ex({year:'5th Year'},/year/i);
+  assert.equal(db.t.certificates.length,0,'nothing half-saved');
+  await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF,...D,title:'=HYPERLINK(1)'});assert.equal(g.rows[1][6],"'=HYPERLINK(1)",'formula injection neutralised in the Sheet');
+});
+test('upload: a different title of the same type is a second certificate; the same title replaces',async()=>{
+  const {db,g,cfg,mk,gf}=await setup();const a=mk({name:'Hackathons'});
+  await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF,...D,title:'First one'});await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF,...D,title:'Second one'});
+  assert.equal(db.t.certificates.length,2);await studentUpload(db,gf,cfg,GB,{requirement_id:a.id,bytes:PDF,...D,title:'First one'});assert.equal(db.t.certificates.length,2);assert.equal(g.live().length,2);
+  const o=await studentOverview(db,GB);assert.equal(o.requirements[0].tracked,true);assert.equal(o.certificates[0].authority,'NPTEL');
+});
+test('overview: only required/deadline types are "tracked"; every active type is available in the dropdown',async()=>{
+  const {db,mk}=await setup();mk({name:'Awards',deadline:null,required:false});mk({name:'Courses',required:true});
+  const o=await studentOverview(db,GB);assert.deepEqual(o.requirements.map(r=>[r.name,r.tracked]),[['Awards',false],['Courses',true]]);
 });
