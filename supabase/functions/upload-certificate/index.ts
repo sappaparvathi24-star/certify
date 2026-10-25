@@ -10,6 +10,6 @@ Deno.serve(async req=>{
     if(!file||file.type!=='application/pdf'||file.size>10*1024*1024)return J({error:'Upload a PDF up to 10 MB.'},400);
     const {data:cfg}=await db.from('settings').select('*').eq('id',1).single();
     const g=realGoogle(await googleToken(db));
-    return J(await uploadCore(db,g,cfg,{roll:r.roll,category:String(form.get('category')||'Other').slice(0,60),title:String(form.get('title')||'').slice(0,120),bytes:new Uint8Array(await file.arrayBuffer()),uploader:p.email}));
+    return J(await uploadCore(db,g,cfg,{roll:r.roll,category:String(form.get('category')||'Other').slice(0,60),title:String(form.get('title')||'').slice(0,120),authority:String(form.get('authority')||'').slice(0,100),cert_date:String(form.get('cert_date')||''),year:String(form.get('year')||''),section:String(form.get('section')||''),bytes:new Uint8Array(await file.arrayBuffer()),uploader:p.email}));
   }catch(e){return J({error:String((e as Error).message||e)},500);}
 });
