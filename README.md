@@ -1,19 +1,19 @@
 # Certifyx — setup guide
 
 Two sides, one backend:
-- **Students** open the site, sign in with **roll number + private code** (no Google account), tick off a **checklist** the admin defined, drop a PDF or photo, done. Category, name, folder and Sheet columns are filled in automatically.
+- **Students** open the site, sign in with **roll number + private code** (no Google account), fill in **Year, Section, Certificate Type, Title, Authority (who conducted it) and Date**, drop a PDF or photo, done. Roll no. and Name come from the login and cannot be edited.
 - **Admin / faculty** sign in with **Google**, connect **their own Google account once**, and run everything from the console. All Drive and Sheet writes happen under the admin's own Google OAuth client — students never grant Google permissions.
 
 Installable as an app (PWA) on phones and desktops.
 
 ## 1. Supabase
-1. Create a project. SQL Editor → run `supabase/schema.sql`, then `supabase/seed.sql` (66 sample rows; import your real roster later). The schema is safe to run again.
+1. Create a project. SQL Editor → run `supabase/schema.sql`, then `supabase/seed.sql` (66 sample rows + your 10 certificate types; import your real roster later). The schema is safe to run again.
    Edit the `faculty_emails` insert at the top first: those Google accounts become faculty.
 2. Authentication → Providers → **Google** → enable (this is only for the admin's sign-in). URL Configuration → Site URL = your website.
 
 ## 2. Your Google OAuth client (the admin's own client ID)
 1. Google Cloud Console → new project → **APIs & Services → Library**: enable **Google Drive API** and **Google Sheets API**.
-2. **OAuth consent screen**: user type External (or Internal for a Workspace); add scopes `…/auth/drive.file` and `…/auth/spreadsheets`; then **Publish app → In production**.
+2. **OAuth consent screen**: user type External (or Internal for a Workspace); add scopes `…/auth/drive` and `…/auth/spreadsheets` (full Drive is needed so the app can write into your **existing** folders, which `drive.file` cannot see; if you connected before, press **Connect Google** again); then **Publish app → In production**.
    ⚠ Leaving it in *Testing* makes the connection die after 7 days. Only you grant access, so the "unverified app" screen is just a warning you click through.
 3. **Credentials → Create OAuth client ID → Web application.** Authorised redirect URIs — add both:
    - `https://YOUR-PROJECT.supabase.co/auth/v1/callback` (admin sign-in to the site)
@@ -35,8 +35,8 @@ Open `https://YOUR-SITE/check.html` — it tests the key, Google provider, table
 
 ## 5. First run (the Overview shows a "Finish setup" checklist)
 1. Sign in with Google → **Settings → Connect Google**. After consent the app **creates the Drive folder and the Sheet** automatically (header row included).
-2. **Students → Import** your roster (`ROLL, NAME`).
-3. **Requirements → Add requirement** for each certificate type (name, deadline, required?, sections, max size).
+2. **Students → Import** your roster (`RollNo, Name, Year, Section, Email` — year, section and email optional).
+3. **Certificate types**: the 10 seeded types (Awards, Courses, Hackathons, Industrial Training, Internships, Others, Participations, Publications, Seminars, Workshops) are your Drive folders. Give a type a deadline / mark it required to put it in students’ “Required for you” list; edit the *Drive folder name* if it differs (e.g. `others`).
 4. **Student access → Generate codes** → *Download CSV* or *Print slips* and hand them out privately. Codes are shown **once**; they are stored only as salted hashes.
 5. Optional: automatic sync + reminders (needs `pg_cron` and `pg_net`):
 ```sql
@@ -48,12 +48,12 @@ select cron.schedule('certifyx-reminders','0 7 * * *',$$ select net.http_post(ur
 
 ## How it works
 - **Student sign-in**: roll number + 10-character code (`XXXXX-XXXXX`, no look-alike letters). 5 wrong attempts lock the account for 15 minutes; admin can reset a code any time (this also signs the student out everywhere). Students never touch the database: every call goes through the `student-api` function with a private session token (14 days, revocable).
-- **Upload**: the requirement decides category, file name (`ROLL_Requirement.pdf`), Drive sub-folder (one per requirement, or one folder — your choice in Settings) and Sheet columns (time, roll, name, category, title, link, submission id, requirement, LATE). Photos (JPG/PNG) are converted to PDF in the browser; the server checks the real PDF signature, size, section and a daily limit. Uploading again for the same requirement **replaces** the old copy — the old one is removed only after the new one is safely stored. After the deadline an upload is accepted and marked **LATE**.
+- **Upload**: the certificate type decides the Drive folder; the file is named `ROLL_Type_Title.pdf`. The Sheet row uses your format — `SLNO., Roll no., Name, Year, Section, Certificate, Title, Auth, Month with date` — followed by helper columns (Drive link, Submission id, Late). Several certificates per type are allowed; uploading the **same title** again replaces the old copy. Photos (JPG/PNG) are converted to PDF in the browser; the server checks the real PDF signature, size, section and a daily limit. Uploading the same title again **replaces** the old copy — the old one is removed only after the new one is safely stored. After the deadline an upload is accepted and marked **LATE**.
 - **Completion** means *every required requirement for the student's section is submitted*; Overview, filters and alert groups all use that rule.
-- **Sync** (button / cron) reconciles Drive (including sub-folders), the Sheet and the database; repairs missing Sheet rows; never resurrects anything you deleted on purpose.
+- **Sync** (button / cron) reconciles Drive (including sub-folders), the Sheet and the database; repairs missing Sheet rows for files uploaded through the app (files that were already in your Drive folder are recorded but never written into your Sheet); never resurrects anything you deleted on purpose.
 - **Reminders**: in-app message to students who still owe a required item due within 3 days or overdue (once per 20 h per item).
 - **Verification**: each certificate has a public link `…/verify.html?id=…` (copy it from the student's record). It shows "verified" with a masked name and the last 4 characters of the roll number — only for approved students.
-- **Faculty console**: Overview (compliance, needs attention, activity), Students (seat map/table, record, approve/reject/notify), Requirements, Student access, Needs review (duplicates/mismatches), Alerts, Export (4 downloads), Audit log, Settings & system check. `Ctrl/⌘ + K` opens a command palette.
+- **Faculty console**: Overview (compliance, needs attention, activity), Students (seat map/table, record, approve/reject/notify), Certificate types, Student access, Needs review (duplicates/mismatches), Alerts, Export (5 downloads, including the **Achievements sheet** in your column format), Audit log, Settings & system check. `Ctrl/⌘ + K` opens a command palette.
 
 ## If something does not work
 Open `check.html` first, then match the message:
