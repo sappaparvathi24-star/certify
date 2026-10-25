@@ -11,8 +11,11 @@ async function reset(){
   db.t.students.find(s=>s.roll_no==='25A31A05EN').section='CSE-A';          // lets the browser test cover section-targeted requirements
   db.t.profiles.push({id:'f1',email:'fac@test.com',full_name:'Jayaram Sappa',role:'faculty',roll_no:null});
   await setCode(db,'25A31A05GB','K7M2Q-9XH4T');await setCode(db,'25A31A05GC','P3R5T-8WN6V');
-  const req=(name,o={})=>db.from('requirements').insert({name,description:name+' certificate',deadline:new Date(Date.now()+30*DAY).toISOString(),...o}).run();
-  req('Hackathon',{sort:1});req('Course Completion',{sort:2});req('Internship',{sort:3,deadline:new Date(Date.now()-2*DAY).toISOString()});req('Sports',{sort:4,sections:['CSE-A']});
+  const req=(name,o={})=>db.from('requirements').insert({name,description:name+' certificates',deadline:null,required:false,...o}).run();
+  const soon=new Date(Date.now()+30*DAY).toISOString(),past=new Date(Date.now()-2*DAY).toISOString();
+  req('Awards',{sort:1});req('Courses',{sort:2,required:true,deadline:soon});req('Hackathons',{sort:3,required:true,deadline:soon});req('Industrial Training',{sort:4});
+  req('Internships',{sort:5,required:true,deadline:past});req('Others',{sort:6,folder_name:'others'});req('Participations',{sort:7});req('Publications',{sort:8});req('Seminars',{sort:9});req('Workshops',{sort:10});
+  req('Sports',{sort:11,sections:['CSE-A']});
 }
 await reset();
 const log=(actor,action,details,category)=>db.from('audit_logs').insert({actor,action,details,category}).run();
@@ -36,7 +39,7 @@ async function fn(req,res,name,url){
   try{
     if(name==='student-api'){
       const ct=req.headers['content-type']||'';let a={token:req.headers['x-student-token']||''};
-      if(ct.includes('multipart')){const fd=await multipart(req),file=fd.get('file');a={...a,action:String(fd.get('action')||'upload'),requirement_id:String(fd.get('requirement_id')||''),bytes:file?new Uint8Array(await file.arrayBuffer()):undefined};}
+      if(ct.includes('multipart')){const fd=await multipart(req),file=fd.get('file');a={...a,action:String(fd.get('action')||'upload'),requirement_id:String(fd.get('requirement_id')||''),title:String(fd.get('title')||''),authority:String(fd.get('authority')||''),cert_date:String(fd.get('cert_date')||''),year:String(fd.get('year')||''),section:String(fd.get('section')||''),bytes:file?new Uint8Array(await file.arrayBuffer()):undefined};}
       else a={...a,...JSON.parse((await body(req)).toString()||'{}')};
       const r=await handleStudentApi(db,gf,cfg,a);return send(res,r.status,r.body);
     }
@@ -70,7 +73,7 @@ http.createServer(async(req,res)=>{
     if(url.pathname==='/fake-google'){Object.assign(db.t.google_connection[0],{refresh_token_enc:'enc',connected_email:'admin@gmail.test',connected_at:new Date().toISOString(),last_ok_at:new Date().toISOString(),last_error:null});Object.assign(db.t.settings[0],{drive_folder_id:'FAKE_FOLDER',spreadsheet_id:'FAKE_SHEET'});db.v++;res.writeHead(302,{Location:'/?google=connected'});return res.end();}
     if(url.pathname==='/v')return send(res,200,{v:db.v});
     if(url.pathname==='/debug/fail'){const b=JSON.parse((await body(req)).toString());if(b.msg)g.fail[b.k]=b.msg;else delete g.fail[b.k];return send(res,200,{ok:true});}
-    if(url.pathname==='/debug')return send(res,200,{drive:g.live().map(f=>f.name),files:g.live().map(f=>({name:f.name,head:f.head,folder:f.folder})),folders:[...g.folders.keys()].map(k=>k.split('|')[1]),rows:g.rows.length,sheet:g.rows,certs:db.t.certificates,students:db.t.students.filter(s=>s.submitted||s.approval!=='PENDING_REVIEW'),logs:db.t.audit_logs.map(l=>l.action),removed:db.t.removed_keys.length,notifs:db.t.notifications.length,settings:db.t.settings[0],studentCount:db.t.students.length,requirements:db.t.requirements,sessions:db.t.student_sessions.length});
+    if(url.pathname==='/debug')return send(res,200,{drive:g.live().map(f=>f.name),files:g.live().map(f=>({name:f.name,head:f.head,folder:f.folder})),folders:[...g.folders.keys()].map(k=>k.split('|')[1]),rows:g.rows.length,sheet:g.rows,certs:db.t.certificates,students:db.t.students.filter(s=>s.submitted||s.approval!=='PENDING_REVIEW'),logs:db.t.audit_logs.map(l=>l.action),removed:db.t.removed_keys.length,notifs:db.t.notifications.length,settings:db.t.settings[0],studentCount:db.t.students.length,studentsFull:db.t.students.map(s=>({roll_no:s.roll_no,year:s.year||null,section:s.section,email:s.email})),requirements:db.t.requirements,sessions:db.t.student_sessions.length});
     if(url.pathname==='/debug/addfile'){const b=JSON.parse((await body(req)).toString());g.addFile(b.name);return send(res,200,{ok:true});}
     if(url.pathname==='/debug/reset'){await reset();return send(res,200,{ok:true});}
     if(req.method==='POST'&&url.pathname==='/api')return api(req,res,JSON.parse((await body(req)).toString()));
