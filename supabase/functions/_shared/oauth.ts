@@ -2,8 +2,8 @@
 const te=new TextEncoder(),td=new TextDecoder();
 const b64u=(u:Uint8Array)=>{let s='';u.forEach(x=>{s+=String.fromCharCode(x);});return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');};
 const unb64=(s:string)=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')+'='.repeat((4-s.length%4)%4)),c=>c.charCodeAt(0));
-export const SCOPES='openid email https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets';
-export const SHEET_HEADER=['Timestamp','Roll Number','Name','Category','Title','Drive Link','Submission ID','Requirement','Late'];
+export const SCOPES='openid email https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets';
+export const SHEET_HEADER=['SLNO.','Roll no.','Name','Year','Section','Certificate','Title','Auth','Month with date','Drive link','Submission id','Late'];
 async function hmac(secret:string,data:string){const k=await crypto.subtle.importKey('raw',te.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);return b64u(new Uint8Array(await crypto.subtle.sign('HMAC',k,te.encode(data))));}
 const same=(a:string,b:string)=>{if(a.length!==b.length)return false;let d=0;for(let i=0;i<a.length;i++)d|=a.charCodeAt(i)^b.charCodeAt(i);return d===0;};
 export async function signState(secret:string,p:object){const body=b64u(te.encode(JSON.stringify(p)));return body+'.'+await hmac(secret,body);}
@@ -30,7 +30,7 @@ export async function createResources(f:typeof fetch,token:string,n={folder:'Cer
   if(!fr.ok)throw new Error('Could not create the Drive folder: '+await fr.text());const folderId=(await fr.json()).id as string;
   const sr=await f('https://sheets.googleapis.com/v4/spreadsheets',{method:'POST',headers:H,body:JSON.stringify({properties:{title:n.sheet},sheets:[{properties:{title:n.tab}}]})});
   if(!sr.ok)throw new Error('Could not create the spreadsheet: '+await sr.text());const spreadsheetId=(await sr.json()).spreadsheetId as string;
-  const hr=await f(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(n.tab)}!A1:I1?valueInputOption=RAW`,{method:'PUT',headers:H,body:JSON.stringify({values:[SHEET_HEADER]})});
+  const hr=await f(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(n.tab)}!A1:L1?valueInputOption=RAW`,{method:'PUT',headers:H,body:JSON.stringify({values:[SHEET_HEADER]})});
   if(!hr.ok)throw new Error('Could not write the Sheet header: '+await hr.text());
   const mr=await f(`https://www.googleapis.com/drive/v3/files/${spreadsheetId}?addParents=${folderId}&removeParents=root&supportsAllDrives=true&fields=id`,{method:'PATCH',headers:H,body:'{}'});
   return {folderId,spreadsheetId,tab:n.tab,moved:mr.ok};}
