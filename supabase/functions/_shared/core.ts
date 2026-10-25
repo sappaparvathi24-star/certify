@@ -13,7 +13,13 @@ export const ROLL=/[0-9]{2}[A-Za-z][0-9]{2}[A-Za-z][0-9]{2}[A-Za-z0-9]{2}/;
 export const normRoll=(s:unknown)=>String(s??'').trim().toUpperCase().replace(/[\s\-_.]/g,'');
 export const idFromLink=(l:string)=>(/\/d\/([A-Za-z0-9_-]+)/.exec(l)||/[?&]id=([A-Za-z0-9_-]+)/.exec(l)||[])[1]||'';
 export const SHEET_ONLY='(sheet only)';
-/** Sheet layout: A time, B roll, C name, D category, E title, F Drive link, G submission id. Row 1 is a header unless B1 looks like a roll no. */
+/** Sheet layout (your format): A SLNO., B Roll no., C Name, D Year, E Section, F Certificate, G Title, H Authority, I Month with date — then our helper columns J Drive link, K Submission id, L Late. Row 1 is a header unless B1 looks like a roll no. */
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+/** 2026-03-14 → "March 2026 (14-03-2026)" */
+export const monthDate=(iso:string)=>{const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso||''));return m?`${MONTHS[+m[2]-1]} ${m[1]} (${m[3]}-${m[2]}-${m[1]})`:'';};
+/** Text typed by students must never become a spreadsheet formula (=, +, -, @ at the start). */
+export const safeCell=(v:unknown)=>{const t=String(v??'');return /^[=+\-@\t\r]/.test(t)?"'"+t:t;};
+export const sheetRow=(c:any,name:string)=>['=ROW()-1',c.roll_no,safeCell(name),safeCell(c.year),safeCell(c.section),safeCell(c.category),safeCell(c.title),safeCell(c.authority),monthDate(c.cert_date),c.drive_link||'',c.id,c.late?'LATE':''];
 export function dataRows(rows:string[][]){const s=rows.length&&!ROLL.test(String(rows[0][1]||''))?1:0;return rows.slice(s).map((cells,i)=>({row:i+s+1,cells}));}
 export const dupKey=(c:any)=>c.roll_no+'|'+(c.file_name===SHEET_ONLY?'s|'+String(c.category||'').toLowerCase()+'|'+String(c.title||'').toLowerCase():String(c.file_name).toLowerCase());
 /** Same student + same file name (or same category+title for sheet-only rows) = duplicate. Different file names are never duplicates. Keeps the best copy. */
@@ -41,27 +47,27 @@ export async function removeCerts(db:any,g:Google,cfg:any,certs:any[]){
   await db.from('removed_keys').upsert([...ids,...files].map(key=>({key})),{onConflict:'key',ignoreDuplicates:true}); // tombstones: sync must never resurrect these
   for(const c of certs)if(c.drive_file_id){try{await g.trash(c.drive_file_id);out.driveTrashed++;}catch(e){out.warnings.push(`Drive (${c.file_name}): ${(e as Error).message}`);}}
   if(cfg.spreadsheet_id){try{
-    const del=dataRows(await g.read(cfg.spreadsheet_id,cfg.sheet_name)).filter(r=>ids.has(String(r.cells[6]||''))||files.has(idFromLink(String(r.cells[5]||'')))).map(r=>r.row);
+    const del=dataRows(await g.read(cfg.spreadsheet_id,cfg.sheet_name)).filter(r=>ids.has(String(r.cells[10]||''))||files.has(idFromLink(String(r.cells[9]||'')))).map(r=>r.row);
     if(del.length){await g.deleteRows(cfg.spreadsheet_id,cfg.sheet_name,del);out.sheetRowsDeleted=del.length;}
   }catch(e){out.warnings.push(`Sheet: ${(e as Error).message}`);}}
   const {error}=await db.from('certificates').delete().in('id',[...ids]);if(error)throw new Error(error.message);
   out.removed=certs.length;return out;
 }
 
-export async function uploadCore(db:any,g:Google,cfg:any,a:{roll:string,category:string,title:string,bytes:Uint8Array,uploader:string,requirement?:any,late?:boolean}){
+export async function uploadCore(db:any,g:Google,cfg:any,a:{roll:string,category:string,title:string,bytes:Uint8Array,uploader:string,requirement?:any,late?:boolean,authority?:string,cert_date?:string,year?:string,section?:string}){
   const {data:st}=await db.from('students').select('name,approval').eq('roll_no',a.roll).single();
   if(!st)throw new Error('Unknown student');
   const name=uploadName(a.roll,a.category,a.title);
   const {data:same}=await db.from('certificates').select('*').eq('roll_no',a.roll).eq('file_name',name);
   let folder=cfg.drive_folder_id;
   if(cfg.folder_layout==='by_requirement'&&a.requirement&&g.ensureFolder){                // one Drive sub-folder per requirement (cached)
-    folder=a.requirement.drive_folder_id||await g.ensureFolder(cfg.drive_folder_id,a.requirement.name);
+    folder=a.requirement.drive_folder_id||await g.ensureFolder(cfg.drive_folder_id,a.requirement.folder_name||a.requirement.name);
     if(folder!==a.requirement.drive_folder_id)await db.from('requirements').update({drive_folder_id:folder}).eq('id',a.requirement.id);}
   const f=await g.upload(folder,name,a.bytes);
-  const {data:row,error}=await db.from('certificates').insert({roll_no:a.roll,category:a.category,title:a.title,file_name:name,drive_file_id:f.id,drive_link:f.webViewLink,in_drive:true,uploaded_by:a.uploader,requirement_id:a.requirement?a.requirement.id:null,late:!!a.late}).select().single();
+  const {data:row,error}=await db.from('certificates').insert({roll_no:a.roll,category:a.category,title:a.title,file_name:name,drive_file_id:f.id,drive_link:f.webViewLink,in_drive:true,uploaded_by:a.uploader,requirement_id:a.requirement?a.requirement.id:null,late:!!a.late,authority:a.authority||null,cert_date:a.cert_date||null,year:a.year||null,section:a.section||null}).select().single();
   if(error||!row){try{await g.trash(f.id);}catch(_){} throw new Error(error?.message||'Could not save certificate');}   // never leave an orphan file
   let sheetOk=true;
-  try{const n=await g.append(cfg.spreadsheet_id,cfg.sheet_name,[new Date().toISOString(),a.roll,st.name,a.category,a.title,f.webViewLink,row.id,a.requirement?a.requirement.name:'',a.late?'LATE':'']);
+  try{const n=await g.append(cfg.spreadsheet_id,cfg.sheet_name,sheetRow(row,st.name));
     await db.from('certificates').update({in_sheet:true,sheet_row:n}).eq('id',row.id);}catch(_){sheetOk=false;}   // stays "Drive only"; sync repairs it
   if(same&&same.length){try{await removeCerts(db,g,cfg,same);}catch(_){}}   // replace the old copy only AFTER the new one is safely stored (a failed upload never loses the previous file)
   await db.from('students').update({submitted:true,...(st.approval==='REJECTED'?{approval:'PENDING_REVIEW',feedback_reason:null}:{})}).eq('roll_no',a.roll);
@@ -91,19 +97,19 @@ export async function syncCore(db:any,g:Google,cfg:any,actor:string){
   const seen=new Set<string>(),low=(s:unknown)=>String(s??'').trim().toLowerCase();
   for(const {row,cells} of dataRows(raw)){
     const roll=normRoll(cells[1]);if(!roll)continue;
-    const sid=String(cells[6]||'').trim(),link=String(cells[5]||''),fid=idFromLink(link);
+    const sid=String(cells[10]||'').trim(),link=String(cells[9]||''),fid=idFromLink(link);
     if(dead.has(sid)||(fid&&dead.has(fid)))continue;                         // removed on purpose
     if(!roster.has(roll)){outside++;continue;}
-    const cat=String(cells[3]||'Certificate'),title=String(cells[4]||'');
+    const cat=String(cells[5]||'Certificate'),title=String(cells[6]||'');
     const free=(x:any)=>!seen.has(x.id)&&x.roll_no===roll;
     const c=C.find(x=>sid&&x.id===sid)||C.find(x=>fid&&x.drive_file_id===fid&&!seen.has(x.id))||C.find(x=>free(x)&&low(x.category)===low(cat)&&low(x.title)===low(title))||C.find(x=>free(x)&&low(x.category)===low(cat));
     if(c){seen.add(c.id);if(!c.in_sheet||c.sheet_row!==row){await db.from('certificates').update({in_sheet:true,sheet_row:row}).eq('id',c.id);c.in_sheet=true;c.sheet_row=row;}}
-    else{const {data:n}=await db.from('certificates').insert({roll_no:roll,category:cat,title,file_name:SHEET_ONLY,in_sheet:true,sheet_row:row,uploaded_by:'sheet-sync'}).select().single();if(n){C.push(n);seen.add(n.id);}}
+    else{const {data:n}=await db.from('certificates').insert({roll_no:roll,category:cat,title,year:String(cells[3]||'')||null,section:String(cells[4]||'')||null,authority:String(cells[7]||'')||null,file_name:SHEET_ONLY,in_sheet:true,sheet_row:row,uploaded_by:'sheet-sync'}).select().single();if(n){C.push(n);seen.add(n.id);}}
   }
   for(const c of C)if(c.in_sheet&&!seen.has(c.id)){await db.from('certificates').update({in_sheet:false,sheet_row:null}).eq('id',c.id);c.in_sheet=false;}
   // 4. repair: in Drive but not in the Sheet → append the row
-  for(const c of C)if(c.in_drive&&!seen.has(c.id)){
-    try{const n=await g.append(cfg.spreadsheet_id,cfg.sheet_name,[new Date().toISOString(),c.roll_no,names.get(c.roll_no)||'',c.category||'',c.title||'',c.drive_link||'',c.id]);
+  for(const c of C)if(c.in_drive&&!seen.has(c.id)&&c.uploaded_by!=='drive-sync'){   // files that were already in your Drive folder before this app are recorded, never written into your Sheet
+    try{const n=await g.append(cfg.spreadsheet_id,cfg.sheet_name,sheetRow(c,names.get(c.roll_no)||''));
       await db.from('certificates').update({in_sheet:true,sheet_row:n}).eq('id',c.id);c.in_sheet=true;repaired++;}catch(_){errors++;}}
   const rep={students_checked:(studs||[]).length,drive_files:files.length,sheet_rows:dataRows(raw).length,outside_class:outside,unidentified:unident,repaired,errors,duration_ms:Date.now()-t0,triggered_by:actor};
   await db.from('sync_reports').insert(rep);
@@ -179,28 +185,39 @@ export async function studentFromToken(db:any,token:string,now=Date.now()){
   const {data:s}=await db.from('student_sessions').select('*').eq('token_hash',await sha256(token)).maybeSingle();
   return s&&new Date(s.expires_at).getTime()>now?(s.roll_no as string):null;
 }
+export const YEARS=['1st Year','2nd Year','3rd Year','4th Year'];
 const appliesTo=(r:any,section:string)=>!r.sections||!r.sections.length||r.sections.includes(section);
 export async function studentOverview(db:any,roll:string,now=Date.now()){
-  const {data:s}=await db.from('students').select('roll_no,name,section,approval,feedback_reason,submitted').eq('roll_no',roll).single();
+  const {data:s}=await db.from('students').select('roll_no,name,section,year,approval,feedback_reason,submitted').eq('roll_no',roll).single();
   const {data:reqs}=await db.from('requirements').select('*').eq('active',true).order('sort');
-  const {data:certs}=await db.from('certificates').select('id,requirement_id,category,title,file_name,in_drive,in_sheet,late,created_at').eq('roll_no',roll).order('created_at',{ascending:false});
+  const {data:certs}=await db.from('certificates').select('id,requirement_id,category,title,authority,cert_date,year,file_name,in_drive,in_sheet,late,created_at').eq('roll_no',roll).order('created_at',{ascending:false});
   const {data:notes}=await db.from('notifications').select('id,title,message,type,sender,is_read,created_at').eq('roll_no',roll).order('created_at',{ascending:false});
   const requirements=(reqs||[]).filter((r:any)=>appliesTo(r,s.section)).map((r:any)=>{
     const c=(certs||[]).find((x:any)=>x.requirement_id===r.id),due=r.deadline?new Date(r.deadline).getTime():null;
-    return {id:r.id,name:r.name,description:r.description,required:r.required,deadline:r.deadline,max_mb:r.max_mb,status:c?'SUBMITTED':due&&due<now?'OVERDUE':'PENDING',late:c?!!c.late:false};});
+    return {id:r.id,name:r.name,description:r.description,required:r.required,tracked:!!(r.required||r.deadline),deadline:r.deadline,max_mb:r.max_mb,status:c?'SUBMITTED':due&&due<now?'OVERDUE':'PENDING',late:c?!!c.late:false};});
   // explicit field lists: never rely on the query's column list to keep Drive links / internals away from students
-  return {student:{roll_no:s.roll_no,name:s.name,section:s.section},approval:s.approval,feedback:s.feedback_reason,requirements,
-    certificates:(certs||[]).map((x:any)=>({id:x.id,requirement_id:x.requirement_id,category:x.category,file_name:x.file_name,in_drive:x.in_drive,in_sheet:x.in_sheet,late:x.late,created_at:x.created_at})),
+  return {student:{roll_no:s.roll_no,name:s.name,section:s.section,year:s.year||null},approval:s.approval,feedback:s.feedback_reason,requirements,
+    certificates:(certs||[]).map((x:any)=>({id:x.id,requirement_id:x.requirement_id,category:x.category,title:x.title,authority:x.authority,cert_date:x.cert_date,year:x.year,file_name:x.file_name,in_drive:x.in_drive,in_sheet:x.in_sheet,late:x.late,created_at:x.created_at})),
     notifications:(notes||[]).map((n:any)=>({id:n.id,title:n.title,message:n.message,type:n.type,sender:n.sender,is_read:n.is_read,created_at:n.created_at}))};
 }
 /** Student upload: requirement decides category, name, folder and Sheet columns. Server re-checks everything (type by file signature, size, section, daily limit). */
-export async function studentUpload(db:any,getG:()=>Promise<Google>,cfg:any,roll:string,a:{requirement_id?:string,bytes?:Uint8Array,now?:number}){
+export async function studentUpload(db:any,getG:()=>Promise<Google>,cfg:any,roll:string,a:{requirement_id?:string,bytes?:Uint8Array,now?:number,title?:string,authority?:string,cert_date?:string,year?:string,section?:string}){
   const fail=(m:string,s=400)=>{throw Object.assign(new Error(m),{status:s});};
   const now=a.now??Date.now();
-  const {data:st}=await db.from('students').select('name,section').eq('roll_no',roll).single();
+  const {data:st}=await db.from('students').select('name,section,year').eq('roll_no',roll).single();
   const {data:req}=await db.from('requirements').select('*').eq('id',a.requirement_id).maybeSingle();
   if(!req||!req.active)fail('That requirement is not available.');
   if(!appliesTo(req,st.section))fail('That requirement is not for your section.');
+  const title=String(a.title??'').trim().replace(/\s+/g,' '),authority=String(a.authority??'').trim().replace(/\s+/g,' '),cert_date=String(a.cert_date??'').trim();
+  if(title.length<3||title.length>120)fail('Enter the title of the certificate (3–120 characters).');
+  if(authority.length<2||authority.length>100)fail('Enter who conducted / issued it (Authority).');
+  const dt=/^\d{4}-\d{2}-\d{2}$/.test(cert_date)?new Date(cert_date+'T00:00:00Z'):null;
+  if(!dt||isNaN(dt.getTime())||dt.toISOString().slice(0,10)!==cert_date)fail('Enter the date of the certificate.');
+  if(dt!.getTime()>now+86400000)fail('The certificate date cannot be in the future.');
+  if(dt!.getTime()<now-20*366*86400000)fail('That certificate date looks wrong.');
+  const year=String(a.year||st.year||'').trim();
+  if(!YEARS.includes(year))fail('Choose your year of study.');
+  const section=String(st.section||a.section||'').trim().slice(0,40);
   const b=a.bytes;
   if(!b||b.length<8)fail('Choose a file first.');
   if(!(b![0]===0x25&&b![1]===0x50&&b![2]===0x44&&b![3]===0x46&&b![4]===0x2d))fail('Only PDF files are accepted (photos are converted automatically).');
@@ -208,7 +225,7 @@ export async function studentUpload(db:any,getG:()=>Promise<Google>,cfg:any,roll
   const {data:logs}=await db.from('audit_logs').select('created_at').eq('actor',roll).eq('action','DIRECT_STUDENT_UPLOAD');
   if((logs||[]).filter((l:any)=>now-new Date(l.created_at).getTime()<86400000).length>=MAX_UPLOADS_PER_DAY)fail('Daily upload limit reached. Try again tomorrow or ask faculty.',429);
   const late=!!(req.deadline&&now>new Date(req.deadline).getTime());
-  const r:any=await uploadCore(db,await getG(),cfg,{roll,category:req.name,title:'',bytes:b!,uploader:roll,requirement:req,late});
+  const r:any=await uploadCore(db,await getG(),cfg,{roll,category:req.name,title,authority,cert_date,year,section,bytes:b!,uploader:roll,requirement:req,late});
   return {ok:true,id:r.id,file_name:r.file_name,sheet_ok:r.sheet_ok,late};
 }
 /** Single entry point used by the `student-api` Edge Function (and by the browser tests). */
@@ -220,7 +237,7 @@ export async function handleStudentApi(db:any,getG:()=>Promise<Google>,cfg:any,a
   try{
     switch(a.action){
       case 'me':return {status:200,body:await studentOverview(db,roll,now)};
-      case 'upload':return {status:200,body:await studentUpload(db,getG,cfg,roll,{requirement_id:a.requirement_id,bytes:a.bytes,now})};
+      case 'upload':return {status:200,body:await studentUpload(db,getG,cfg,roll,{requirement_id:a.requirement_id,bytes:a.bytes,now,title:a.title,authority:a.authority,cert_date:a.cert_date,year:a.year,section:a.section})};
       case 'read':await db.from('notifications').update({is_read:true}).eq('id',a.id).eq('roll_no',roll);return {status:200,body:{ok:true}};
       case 'change_code':{
         const {data:au}=await db.from('student_auth').select('*').eq('roll_no',roll).single();
