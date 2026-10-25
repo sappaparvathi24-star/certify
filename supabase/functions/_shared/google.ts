@@ -52,7 +52,7 @@ export function realGoogle(t:string):Google{
       if(!r.ok)throw new Error('Drive upload failed: '+await r.text());return await r.json();},
     async trash(id){const r=await fetch(`https://www.googleapis.com/drive/v3/files/${id}?supportsAllDrives=true`,{method:'PATCH',headers:{...H,'Content-Type':'application/json'},body:JSON.stringify({trashed:true})});
       if(!r.ok&&r.status!==404)throw new Error('Drive trash failed: '+await r.text());},
-    async read(id,tab){const r=await fetch(sheetUrl(id,`/values/${encodeURIComponent(tab)}!A:G`),{headers:H});if(!r.ok)throw new Error('Sheet read failed: '+await r.text());return (await r.json()).values||[];},
+    async read(id,tab){const r=await fetch(sheetUrl(id,`/values/${encodeURIComponent(tab)}!A:L`),{headers:H});if(!r.ok)throw new Error('Sheet read failed: '+await r.text());return (await r.json()).values||[];},
     async append(id,tab,row){const r=await fetch(sheetUrl(id,`/values/${encodeURIComponent(tab)}!A1:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`),{method:'POST',headers:{...H,'Content-Type':'application/json'},body:JSON.stringify({values:[row]})});
       if(!r.ok)throw new Error('Sheet append failed: '+await r.text());const m=/![A-Z]+(\d+)/.exec((await r.json()).updates?.updatedRange||'');return m?+m[1]:null;},
     async deleteRows(id,tab,rows){
